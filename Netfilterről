@@ -1,0 +1,665 @@
+A Netfilterről
+A Netfilter a Linux csomagszűrő rendszere, amelyet az iptables, ip6tables, ebtables és arptables paranccsal irányíthatunk. A Netfilter a hálózatba érkező csomagokat láncokon keresztül vezeti. A láncok kapcsolatban vannak néhány netfilter táblával, amelyen keresztül elérhetjük a láncon mozgó csomagokat.
+
+Az alábbi ábra ezt szemlélteti:
+
+   --->PRE------>[ROUTE]--->FWD---------->POST------>
+       Conntrack    |       Mangle   ^    Mangle
+       Mangle       |       Filter   |    NAT (Src)
+       NAT (Dst)    |                |    Conntrack
+       (QDisc)      |             [ROUTE]
+                    v                |
+                    IN Filter       OUT Conntrack
+                    |  Conntrack     ^  Mangle
+                    |  Mangle        |  NAT (Dst)
+                    v                |  Filter
+Baloldalról jönnek a csomagok befele, és először elérik a PREROUTING láncot (röviden PRE). Tulajdonképpen megnézzük kell-e valamit tennünk a csomagokkal routolás előtt. A PRE felirat alatt látjuk, hogy mi az ami a csomagok továbbjutásába beleszólhat.
+
+beleszólhat a csomagok conntrack rendszer
+beleszólhatunk a Mangle táblát kezelve
+beleszólhatunk a NAT táblát kezelve
+beleszólhat a forgalomszabályzó rendszer
+Ha keresztül jutott a PREROUTING láncon, jöhet a routolás, azaz az útválasztás. El kell döntenie az útválasztó algoritmusoknak, hogy a csomag nekünk szól vagy más gépnek kell továbbítani. Ha nekünk szól, akkor a helyi folyamatok felé irányítjuk az INPUT láncon keresztül (az ábrán IN), ha nem, akkor a FORWARD láncon (az ábrán FDW) keresztül mehet az interfész felé. Persze itt érinteni fogja még a POSTROUTING láncot (ábrán POST).
+
+Ha a csomag az INPUT láncon jön befele a helyi folyamatok felé akkor három dolog szólhat bele a csomag útjába.
+
+beleszólhat a conntrack rendszer
+a filter táblán keresztül szabályozhatjuk
+a mangle táblán keresztül szabályozhatjuk
+Ha a FORWARD láncon megy kifele, akkor két dolog szólhat bele a csomag útjába:
+
+a filter táblán keresztül szabályozhatjuk
+a mangle táblán keresztül szabályozhatjuk
+Ez után persze még át kell jutnia a POSTROUTING láncon is, ahol újabb szabályok jöhetnek:
+
+a mangle táblán keresztül szabályozhatjuk
+a NAT táblán keresztül szabályozhatjuk
+beleszólhat a conntrack rendszer
+Ezek után még egy eset lehetséges. A csomag nem kintről jön, hanem a helyi folyamatok felől megy kifele. Ekkor két láncot érint. Elsőként az OUTPUT láncot, majd routing után a POSTROUTING láncot. Az OUTPUT láncon beleszólhat:
+
+a Conntrack rendszer
+a mangle táblán keresztül szabályozhatjuk
+a NAT táblán keresztül szabályozhatjuk
+a filter táblán keresztül szabályozhatjuk
+A POSTROUTING láncon beleszólhat:
+
+a mangle táblán keresztül szabályozhatjuk
+a NAT táblán keresztül szabályozhatjuk
+a Conntrack rendszer
+Láthatjuk, hogy mi három táblán keresztül szólhatunk bele a csomagok útjába:
+
+filter
+mangle
+nat
+raw
+A listában szerepel még egy negyedik tábla is, a raw, ezt kivételek kezeléséhez szoktuk használni. A táblák kezelését az iptables parancssori programmal fogjuk szabályozni.
+
+Működés
+szabálylistákat állítunk fel
+a kernel minden beérkező csomagot végig futtat a listákon
+az első egyező szabálynál végrehajtja az ott beállított tevékenységet
+tevékenységek lehetnek:
+elfogadás
+eldobás
+naplózás
+Használt parancs
+Fentebb már említettük, hogy az iptables parancsot fogjuk használni. A korábbi kernel verzióknál nem ez volt a program neve:
+
+1.3 kernel pf
+2.0 kernel ipfwadm
+2.2 kernel ipchains
+2.4 kernel iptables
+2.6 kernel iptables
+Egyéb netfilter programok
+Az iptables parancs mellett van még néhány parancs amelyet használhatunk. A Netfilter szabályozásához használható parancsok listája:
+
+ebtables (Bridge)
+arptables (ARP)
+iptables (IPv4)
+ip6tables (IPv6)
+Fogalmak
+Láncok
+A fentiekből kiderült, hogy van öt darab láncunk. Foglaljuk össze ezeket:
+
+PREROUTING
+interfészről jön a csomag, még routing előtt
+FORWARD
+routing után, ha a csomag nem lokális folyamatnak szól
+POSTROUTING
+routing után miután egy csomag elhagyja a vermet
+INPUT
+routing után, ha a csomag lokális folyamatnak szól
+OUTPUT
+routing előtt, egy lokális folyamatól megkapja a verem a csomagot
+A szabályokat tehát ezekre a láncokra kell beállítani. Az iptables parancsnak meg fogjuk mondani, hogy melyik láncra szeretnénk szabályt felállítani.
+
+Illeszkedés
+Az iptables parancsnak meg kell mondanunk, hogy milyen csomagokra illeszkedjen egy szabály.
+
+Megmondhatjuk, hogy csak TCP, UDP vagy ICMP protokollokra illeszkedjen. A protokollt konkrétan a -p kapcsolóval adjuk meg. Például:
+
+-p tcp
+-p udp
+-p icmp
+Ha nem használjuk a -p kapcsolót, akkor illeszkedik a tcp, udp, icmp és más csomagokra is.
+
+-p all
+Megadhatunk IP címeket és/vagy tartományneveket.
+
+A -s kapcsolóval, mi volt a forrás IP címe.
+
+A -d kapcsolóval, mi volt a cél IP cím.
+
+Példa:
+
+-s 192.168.5.1 -d 192.168.5.2
+Portot adhatunk meg:
+
+A --dport kapcsoló cél oldali portot jelent
+
+A --sport kapcsoló forrás oldali portot jelent.
+
+--dport 80 --sport 1025
+Láthatjuk, hogy az illeszkedés segítségével határozzuk meg, hogy milyen típusú csomagra akarunk szabályt létrehozni.
+
+Csomagok sorsai
+Ha egy csomag illeszkedik egy szabályra, akkor dönthetünk a sorsáról. Elfogadjuk, eldobjuk, visszautasítjuk, naplózzuk, egy felhasználói folyamat felé irányítjuk. Ennek megfelelően a következő célpontokat használhatjuk:
+
+ACCEPT a csomag folytatja útját
+DROP a csomag eldobása
+REJECT mint a DROP csak visszajelez
+LOG a csomagról naplóbejegyzés készül
+RETURN beépített láncnál alapirányelv, saját láncnál az előző láncra ugrás, köv. szab.
+QUEUE a csomag a felhasználói tér felé
+STOLEN egy alrendszer kezeli tovább a csomagot
+A szabályokról
+Minden lánc rendelkezik egy alapszabállyal (más néven irányelvvel). Az alapszabály külön kapcsolóval állítható (-P).
+Az alapszabályra újabb szabályok építhetők, ezekből fog összeállni a szabálylista.
+Egy láncra érkező csomag először végigjárja a szabályokat, ha egyikre sem illeszkedett, akkor az alapszabály fog érvénybe lépni.
+
+Az iptables kapcsolói
+Aktuális szabályok listázása?
+Rövid kapcsolóval:
+
+iptables -L
+Hosszú kapcsolóval:
+
+iptables --list
+Az INPUT láncra illeszkedő szabályokat szeretnénk látni:
+
+iptables -L INPUT
+A „nat” táblára illeszkedő szabályokat szeretnénk látni:
+
+iptables -t nat -L
+A „mangle” táblára illeszkedő szabályokat szeretnénk látni:
+
+iptables -t mangle -L
+A „filter” táblára illeszkedő szabályokat szeretnénk látni:
+
+iptables -t filter -L
+Persze a filter tábla használata az alapértelmezett, így azt meg sem kell adni, mint fentebb.
+
+Láncok ürítése
+Láncok szabályainak törlése:
+
+iptables -F 
+Az alapértelmezett szabály megmarad.
+
+Ha voltak, saját láncok törlése:
+
+iptables -X 
+Alapértelmezett irányelv beállítása, persze alapértelmezetten ACCEPT.
+
+iptables -P INPUT ACCEPT
+Ugyanez az OUTPUT láncon:
+
+iptables -P OUTPUT ACCEPT
+A FORWARD láncon:
+
+iptables -P FORWARD ACCEPT
+Láncok alapszabályai
+iptables -P INPUT ACCEPT
+iptables -P INPUT DROP
+iptables -L INPUT
+Szabályok
+Szokásos helyzet, hogy az alapértelmezett szabályt DROP-ra állítom, és mindent egyenként engedélyezek.
+Ha távolról dolgozunk (ssh), akkor első dolgunk legyen a 53 port mellett a 22 port engedélyezése mielőtt beállítom az alapértelmezett DROP-ot! (Különben kitiltjuk magunkat!)
+Szabályok kezelése
+Három szabályt alkotunk meg. Egy hozzáfűzéssel, kettő beszúrással.
+
+iptables -A INPUT -p udp --sport 53 -j ACCEPT
+iptables -I INPUT -p TCP --dport 80 -j ACCEPT
+iptables -I INPUT 2 -p TCP --dport 80 -j ACCEPT
+Ez utóbbi szabály lesz a második, az eredeti a harmadik lesz.
+
+A következő utasítás a 2-s szabályt cseréli le:
+
+iptables -R INPUT 2 -p TCP --dport 80 -j DROP
+A második szabály törlése:
+
+iptables -D INPUT 2
+Ha nem tudjuk mi a száma a törlendő szabálynak az iptalbes -L után használjuk a --line-numbers kapcsolót:
+
+iptables -L --line-numbers
+Így minden sor kap egy sorszámot.
+
+Példák hálózat/IP megadására
+iptables -A INPUT -p tcp -s 192.168.1.0/24 --sport 80 -j ACCEPT
+iptables -A INPUT -p tcp -d 192.168.3.0/24 --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp -s 192.168.1.0/24 --sport 80 -d 192.168.4.0/24 -j ACCEPT
+iptables -A INPUT -p tcp -d 192.168.1.5 --dport 80 -j ACCEPT
+Az összes forrás megadása:
+
+-s 0/0
+De ez olyan mintha semmit nem írtunk volna.
+
+OUTPUT és FORWARD lánc példa
+iptables -A FORWARD -p tcp -s $BELSOHALO -i eth1 -m state --state NEW,ESTABLISHED --dport 80 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 80 -m state --state NEW,ESTABLISHED -j ACCEPT
+Loopback interface
+iptables -A INPUT -p all -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
+Erre mindig szükség van, mert néhány dolog e nélkül nem működik.
+
+Portok, átviteli protokoll
+DNS UDP 53 (Zóna transfer tcp!)
+SSH TCP 22
+HTTP TCP 80
+https TCP 443
+smtp TCP 25
+pop3 TCP 110
+pop3s TCP 995
+proxy TCP 8080 vagy 3128
+ftp TCP 21 [ és 20 ]
+samba UDP 137,138, TCP 139, 445
+dhcp UDP 67,68
+icmp ICMP (nincs portja)
+ICMP
+iptables -A INPUT -p ICMP -d 192.168.1.1 -j ACCEPT
+iptables -A INPUT -p icmp --icmp-type echoreply -j DROP
+Biztonság miatt ilyen szabályokat szoktak még megadni, de ez csak önmagunk életének megkeserítése!
+
+Naplózás
+-j LOG
+--log-level
+Egy szám vagy név követi. „debug”, „info”, „notice”, „warning”, „err”, „crit”, „alert” és „emerg” (kis- vagy nagybetűsek egyaránt): a számok a felsorolás számai 7-0. A naplózási szintek részletei
+
+man syslog.conf
+--log-prefix
+Egy maximum 29 karakter hosszú szöveg, amely a log üzenetek elejére kerül (egyedi azonosítás lehetősége)
+
+iptables -N log-drop
+iptables -j LOG --log-prefix "DROP "
+iptables -j DROP
+Használjuk a -m limit kapcsolót, mert teleszemetelhetik a naplófájlt:
+
+iptables -j LOG --log-prefix "DROP " -m limit
+Naplózás beállítása
+Állítsuk be azt a szabályt amit naplózni szeretnénk, majd a cél legyen LOG. A naplózó szabály előbb legyen mint maga a szabály!!!
+
+iptables -A INPUT -t icmp -j LOG --log-prefix „ICMP bárhonnan”
+iptables -A INPUT -t icmp -j ACCEPT
+tail /var/log/syslog
+Állapotfigyelés
+A csomagok állapotára is beállíthatunk illeszkedést. Ezzel fejlettebb, állapotfigyelő csomagszűrő tűzfalat készíthetünk. Az állapotfigyeléshez szükség van a state modulra, és a --state kapcsolóra, hogy megadjuk, melyik állapotot szeretnénk figyelni.
+
+-m state --state
+Állapotok
+NEW - új kapcsolat
+ESTABLISED - válaszcsomag
+RELATED - új, de egy másik kapcsolathoz tartozik
+INVALID - nem azonosítható
+NEW
+Új kapcsolatot létesítő csomag.
+ESTABLISHED
+Egy csomag, mely létező kapcsolatot jelez (egy visszajelző csomag, vagy egy visszajelzett kapcsolaton kimenő csomag).
+RELATED
+Egy létező kapcsolathoz tartozó, de annak részét nem képező csomag, mint például egy ICMP hibaüzenet, vagy (beépített FTP modullal) egy ftp adatkapcsolatot létesítő csomag.
+INVALID
+Egy valamilyen okból nem azonosítható csomag: ez magában foglalja a memória túlcsordulásokat és az ICMP hibaüzeneteket, melyek nem felelnek meg egyetlen ismert kapcsolatnak sem. Általában ezek a csomagok eldobandók.
+Állapotfigyelés példa
+iptables -A INPUT -m state --state NEW -m tcp -p tcp --dport 80 -j ACCEPT
+A webszerverhez bejövő új csomagokat elfogadjuk.
+
+Tartó tárolás
+A Netfilter beállítások tárolása
+Telepítsük az iptables-persistent csomagot:
+
+# apt install iptables-persistent
+Ha nem mentettük még a tűzfalszabályokat:
+
+# iptables-save > /etc/iptables/rules.v4
+# ip6tables-save > /etc/iptables/rules.v6
+A telepítő egyébként rákérdez, hogy mentsük-e a szabályokat. Ha az iptables-persistent telepítésekor mentettük az iptables szabályokat nincs teendőnk. Viszont minden iptables változtatás esetén mentsük a szabályokat, az iptables-save és ip6tables-save paranccsal a fentieknek megfelelően.
+
+Ellenőrzés:
+
+# systemctl status netfilter-persistent
+Az ellenőrzéshez persze, úgy a legtisztább, ha újraindítjuk a gépet:
+
+# reboot
+A kernel beállítások tárolása
+NAT Engedélyezése a kernelben:
+
+Szerkesszük a sysctl.conf állományt:
+
+# nano /etc/sysctl.conf:
+Tartalma ez legyen:
+
+net.ipv4.ip_forward = 1
+Változások betöltése:
+
+# sysctl -p /etc/sysctl.conf
+Indítsuk újra a procfs újragenerálása:
+
+# systemctl restart procps
+Ellenőrzés:
+
+# sysctl net.ipv4.ip_forward
+vagy:
+
+# cat /proc/sys/net/ipv4/ip_forward
+Fontos szempontok
+Az ICMP-ét globálisan engedni kell
+broadcast ICMP tiltása
+ne jöjjön kívülről, ha bent van
+ki se engedjünk olyat, ami azt állítja forrás IP-je nem helyi, de kifele megy
+Ne az alapszabály legyen a DROP. Helyette az engedő szabályok végén egy DROP naplózással
+Az rp_filter-t kapcsoljuk be ( echo 1 > /proc/sys/net/ipv4/conf/eth0/rp_filter)
+Függelék
+Samba portok
+netbios-ns 137/udp # NetBIOS Name Service
+netbios-dgm 138/udp # NetBIOS Datagram Service
+netbios-ssn 139/tcp # NetBIOS Session Service
+microsoft-ds 445/tcp # Microsoft Directory Service
+iptables -A INPUT -p udp --dport 137 -j ACCEPT
+iptables -A INPUT -p udp -m udp --dport 138 -j ACCEPT
+iptables -A INPUT -m state --state NEW -m tcp -p tcp --dport 139 -j ACCEPT
+iptables -A INPUT -m state --state NEW -m tcp -p tcp --dport 445 -j ACCEPT
+FTP kapcsolatkövető modul
+modprobe ip_conntrack_ftp
+Nem töltödik be magától.
+
+Vegyük fel a következő állományba:
+
+/etc/modules
+Alapból szükséges:
+
+iptables -A INPUT -p TCP --dport 21 -j ACCEPT
+Aktív mód
+iptables -A INPUT -p TCP --dport 20 -m state --state ESTABLISHED, RELATED -j ACCEPT
+iptables -A OUTPUT -p tcp --sport 20 -m state --state ESTABLISHED -j ACCEPT
+Passzív mód
+iptables -A INPUT -p TCP --sport 1024: -m state --state ESTABLISHED,RELATED -j ACCEPT
+Mindkét esetben legyen engedélyezve a DNS lekérés, mert lassú lesz a FTP kapcsolódás:
+
+iptables -A INPUT -p UDP --sport 53 -j ACCEPT
+Ha az OUTPUT lánc is szűrve van (passzív módnál csak 21 port):
+
+iptables -A OUTPUT -p tcp -s "szerver_ip_cím" --sport 20:21 -j ACCEPT
+NAT
+A NAT
+A NAT a ciscos világban többféle NAT áll rendelkezésre, ők ezt nem is NAT-nak hívják hanem PAT-nak. De szoktunk néha szimplán maszkolásról beszélni.
+
+IP továbbítás engedélyezése
+A sysctl paranccsal ellenőrizzük be van-e állítva:
+
+sysctl net.ipv4.ip_forward
+net.ipv4.ip_forward = 0
+vagy a /proc rendszeren keresztül:
+
+cat /proc/sys/net/ipv4/ip_forward
+0
+Engedélyezés menet közben:
+
+sysctl -w net.ipv4.ip_forward=1
+vagy
+
+echo 1 > /proc/sys/net/ipv4/ip_forward
+Végleges beállítás a /etc/sysctl.conf fájlban:
+
+/etc/sysctl.conf
+net.ipv4.ip_forward = 1
+Ha nincs ilyen beállítás akkor elkészítjük, ha van ilyen 1-re állítjuk, ha értéke nem 1 lenne.
+
+Ha készen van a beállítás, azok aktualizálásához futtasd a következő parancsot:
+
+sysctl -p /etc/sysctl.conf
+RedHat alapú rendszereken lehet a következő is:
+
+service network restart
+Debian alapú rendszereken procps szolgáltatás újraindítása:
+
+/etc/init.d/procps.sh restart
+A fentiek mellett beállítható még a következő két kernelparaméter:
+
+net.ipv6.conf.default.forwarding=1
+net.ipv6.conf.all.forwarding=1
+Esetleg a broadcast ping tiltása:
+
+echo 1 > /proc/sys/net/ipv4/icmp_echo_ignore_broadcasts
+Esetleg a hamis csomagok szűrése:
+
+echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter
+Ha egy csomag nem a mi tartományunkból van, akkor azt dobjuk el. Például 192.168.1.0/24 tartományban vagyunk és ilyen címre érkezik csomag a külső interfészre.
+
+Esetleg az ICMP csomagok elfogadása:
+
+echo 0 > /proc/sys/net/ipv4/icmp_echo_ignore_all
+Network-address-translation (NAT)
+Emlékeztetőül, erre mindenképpen szükség van:
+
+echo 1 > /proc/sys/net/ipv4/ip_forward
+Példa:
+
+iptables --table nat --append POSTROUTING --out-interface eth0 -j MASQUERADE
+Rövidebben ugyanaz:
+
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+Újabb példa
+
+iptables -t nat -A POSTROUTING -o eth0 -s 192.168.1.0/24 -j MASQUERADE
+(A 192.168.1.0/24 a maszkolandó hálózat. Az eth0 az Inernet felőli interface)
+
+Maszkolás beállításának ellenőrzése:
+
+iptables -t nat -L
+PPP kapcsolat esetén:
+
+iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE
+FORWARD lánc
+Ha maszkolást állítottunk be, akkor a csomagok a FORWARD láncon mennek át a Netfilteren. Ha ennek a láncnak az alapértelmezett szabálya a DROP, akkor engednünk kell a maszkolt csomagokat:
+
+iptables -A FORWARD -i eth0 -o eth1 -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -A FORWARD -i eth1 -o eth0 -j ACCEPT
+A példában feltételezzük, hogy a belső hálózat (LAN) az eth1 hálózati kártyán van, az Internet pedig az eth0-án.
+
+Klasszikus támadások védése
+#Block DDOS - SYN-flood blokkolása:
+
+iptables -A INPUT -p tcp --syn -m limit --limit 1/s --limit-burst 4 -j ACCEPT
+vagy:
+
+iptables -A INPUT -p tcp --syn -m iplimit --iplimit-above 9 -j DROP
+--limit 1/s: 1 másodperc alatt átlagosan maximálisan elfogadott csomagok
+--limit-burst 4 Induláskor ennyi csomag megengedett
+Esetleg lehet így kombinálni:
+
+# Beenged két szolgáltatást:
+iptables -A INPUT -p tcp --syn --dport 25 -j ACCEPT
+iptables -A INPUT -p tcp --syn --dport 80 -j ACCEPT
+# Limitet ha nem lépi túl jöhet:
+iptables -A INPUT -p tcp --syn -m limit --limit 1/s --limit-burst 4 -j ACCEPT
+# Minden más kapcsolatkezdeményezőt tiltunk:
+iptables -A INPUT -p tcp --syn -j DROP
+Alattomos portscan:
+
+iptables -A INPUT -p tcp --tcp-flags SYN,ACK,FIN,RST RST -m limit --limit 1/s -j ACCEPT
+#DOS - Ping of Death blokkolása A halál pingje:
+
+iptables -A INPUT -p icmp --icmp-type echo-request -m limit --limit 1/s -j ACCEPT
+vagy:
+
+iptables -A INPUT -p ICMP --icmp-type echo-request -m length --length 60:65535 -j ACCEPT
+Letapogatás ellen:
+
+iptables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP
+Új kapcsolat a kapcsolat, de nem SYN csomag.
+
+Egyéb minták:
+
+#TCP-CONNECT scan blokkolás (SYN csomagok; stealth scan vagy half-open scan; be nem fejezett TCP kapcsolódás)
+iptables -A INPUT -p tcp --syn -j DROP
+
+#TCP-SYN scan blokkolás (csak SYN csomagok)
+iptables -A INPUT -m conntrack --ctstate NEW -p tcp --tcp-flags SYN,RST,ACK,FIN,URG,PSH SYN -j DROP
+
+#TCP-FIN scan blokkolása (csak FIN csomagok)
+iptables -A INPUT -m conntrack --ctstate NEW -p tcp --tcp-flags SYN,RST,ACK,FIN,URG,PSH FIN -j DROP
+
+#TCP-ACK scan blokkolása (csak ACK csomagok)
+iptables -A INPUT -m conntrack --ctstate NEW -p tcp --tcp-flags SYN,RST,ACK,FIN,URG,PSH ACK -j DROP
+
+
+#TCP-NULL scan blokkolás (csomag jelzők nélkül)
+iptables -A INPUT -m conntrack --ctstate INVALID -p tcp --tcp-flags ! SYN,RST,ACK,FIN,URG,PSH SYN,RST,ACK,FIN,URG,PSH -j DROP
+
+#Block "Karácsonyfa" TCP-XMAS scan blokkoása (csomagok FIN, URG, PSH jelzővel)
+iptables -A INPUT -m conntrack --ctstate NEW -p tcp --tcp-flags SYN,RST,ACK,FIN,URG,PSH FIN,URG,PSH -j DROP
+
+
+#DOS - Teardrop blokkolása
+iptables -A INPUT -p UDP -f -j DROP
+
+
+#DDOS - Smurf blokkolása
+iptables -A INPUT -m pkttype --pkt-type broadcast -j DROP
+iptables -A INPUT -p ICMP --icmp-type echo-request -m pkttype --pkttype broadcast -j DROP
+iptables -A INPUT -p ICMP --icmp-type echo-request -m limit --limit 3/s -j ACCEPT
+
+
+#Block DDOS - Fraggle blokkolás
+iptables -A INPUT -p UDP -m pkttype --pkt-type broadcast -j DROP
+iptables -A INPUT -p UDP -m limit --limit 3/s -j ACCEPT
+
+
+#DDOS - UDP-flood (Pepsi) blokkolás
+iptables -A INPUT -p UDP --dport 7 -j DROP
+iptables -A INPUT -p UDP --dport 19 -j DROP
+
+#DDOS - SMBnuke blokkolás
+iptables -A INPUT -p UDP --dport 135:139 -j DROP
+iptables -A INPUT -p TCP --dport 135:139 -j DROP
+
+#DDOS - Connection-flood blokkolás
+iptables -A INPUT -p TCP --syn -m iplimit --iplimit-above 3 -j DROP
+
+
+#DDOS - Jolt blokkolás
+iptables -A INPUT -p ICMP -f -j DROP
+Transzparens proxy
+Látszólag nincs proxy. A kérések a 80-as portra érkeznek, amelyek szimpla NAT-al mennének át a tűzfalon, de ezeket a csomagokat átirányítjuk a proxy szerver számára.
+
+iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to 192.168.1.2:3128
+A fenti példában feltételezzük, hogy a proxy szerver a 3128-as címen figyel.
+
+squid.conf (Squid 2.4-hez):
+
+http_port 3128
+httpd_accel_host virtual
+httpd_accel_port 80 httpd_accel_with_proxy
+on httpd_accel_uses_host_header on
+httpd_accel_single_host off
+Egyszerű script
+Egy egyszerű script egy szerver esetén mejnek IP címe 195.199.8.20
+
+tuzfal.sh
+#!/bin/sh
+ 
+iptables -F
+iptables -X
+ 
+# Alapértelmezett irányelvek megadása
+iptables -P INPUT DROP
+iptables -P OUTPUT ACCEPT
+iptables -P FORWARD ACCEPT
+ 
+# Helyben mindent engedünk
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+ 
+iptables -A INPUT -p udp -d 195.199.8.20 --dport 53 -j ACCEPT
+iptables -A INPUT -p tcp -d 195.199.8.20 --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp -d 195.199.8.20 --dport 25 -j ACCEPT
+iptables -A INPUT -p tcp -d 195.199.8.20 --dport 110 -j ACCEPT
+iptables -A INPUT -p tcp -d 195.199.8.20 --dport 3306 -j ACCEPT
+iptables -A INPUT -p tcp -d 195.199.8.20 --dport 22 -j ACCEPT
+Naplózásos példa
+Ami nincs engedélyezve itt sem mehet át:
+
+tuzfal.sh
+#!/bin/sh
+ 
+# Ürítjük a láncokat
+iptables -F
+ 
+# Helyben mindent engedünk
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+ 
+# Szeretnénk kifele látni DNS-t:
+iptables -A INPUT -p udp --sport 53 -j ACCEPT
+ 
+# Szeretnénk kifele látni Webet:
+iptables -A INPUT -p tcp --sport 80 -j ACCEPT
+ 
+# Ami eddig nem ment át azt naplózzuk:
+iptables -A INPUT -j LOG --log-prefix "DROP "
+ 
+# Minden mást eldobunk:
+iptables -A INPUT -j DROP
+Itt azonban, ami nem ment át egy engedő szabályon sem, azt naplózzuk, utána eldobjuk.
+
+Állapotkövető
+#!/bin/bash
+ 
+# Először töröljük a szabályokat
+iptables --flush INPUT
+iptables --flush OUTPUT
+iptables --flush FORWARD
+ 
+iptables --policy INPUT DROP
+iptables --policy OUTPUT ACCEPT
+iptables --policy FORWARD DROP
+ 
+ 
+# INPUT lánc
+iptables --append INPUT --in-interface lo --jump ACCEPT
+iptables --append INPUT --protocol icmp --jump ACCEPT
+ 
+# A kiépített kapcsolatok csomagjai jöhetnek
+iptables --append INPUT --match state --state ESTABLISHED --jump ACCEPT
+iptables --append INPUT --match state --state RELATED --jump ACCEPT
+ 
+# Szolgáltatások mehetnek
+iptables --append INPUT --protocol tcp --destination-port 80 --match state --state NEW --jump ACCEPT
+ 
+# OUTPUT lánc
+iptables --append INPUT --out-interface lo --jump ACCEPT
+ 
+# Rejtőzködési céllal:
+iptables --append OUTPUT --protocol icmp --icmp-type echo-reply --jump  DROP
+iptables --append OUTPUT --protocol icmp --icmp-type timestamp-replay --jump  DROP
+ 
+ 
+# FORWARD lánc
+iptables --append FORWARD --jump REJECT --reject-width icmp-net-unreachable
+Burkolóprogramok
+ufw (konzolra)
+gufw (grafikus felületre)
+Modulok
+iptables modulok Debian GNU/Linux 6.x alatt:
+
+ls /lib/xtables
+iptables modulok még több:
+
+apt-get install xtables-addons-common
+Több info:
+
+man xtables-addons
+IP limit
+Az iplimit nem szerepel a Debian GNU/Linux 6.x verziójában.
+
+IP,TCP limit. Egy helyről max 5 SYN csomag
+
+iptables -A INPUT -p tcp --syn -m iplimit --iplimit-above 5 -j REJECT
+A mangle tábla használata
+iptables -t mangle -A PREROUTING -i eth0 -j MARK --set-mark 1
+Terheléselosztás
+iptables -t nat -A PREROUTING -p tcp --dport 80 -m state --state NEW \
+  -m statistic --mode nth --every 3 -j DNAT --to-destination 192.168.1.1:80
+ 
+iptables -t nat -A PREROUTING -p tcp --dport 80 -m state --state NEW \
+  -m statistic --mode nth --every 2 -j DNAT --to-destination 192.168.1.2:80
+ 
+iptables -t nat -A PREROUTING -p tcp --dport 80 -m state --state NEW \
+ -m statistic --mode nth --every 1 -j DNAT --to-destination 192.168.1.3:80
+Minden harmadik csomag (33%) illeszkedik az elsőre. A fennmaradó 66%, 50%-a második szabályra illeszkedik. A fennmaradó csomagok az utolsóra illeszkednek. A szabály célja DNAT lesz. A bejövő webforgalom három szerver között oszlik meg.
+
+man iptables
+Keressünk rá a statistic szóra.
+
+Portátirnyítás
+iptables -t nat -A PREROUTING -i enp0s3 -p tcp --dport 80 -j REDIRECT --to-port 3180
+Praktikák
+Kifele DNS lekérdezés, ha vissza jön:
+
+iptables -A INPUT -p udp --sport 53 -m state --state ESTABLISHED -j ACCEPT
+Kifele webszerverek elérhetők, például hálózati telepítéshez:
+
+iptables -A INPUT -p tcp --sport 80 --dport 1024:65536 -m state ESTABLISHED -j ACCEPT
+Távolról ping-el tesztelhetik a szerverünk:
+
+iptables -A INPUT -p icmp --icmp-type 8 -j ACCEPT
+Távoli gépeket ping-el tesztelhetünk:
+
+iptables -A INPUT -p icmp --icmp-type 0 -j ACCEPT
