@@ -1,0 +1,184 @@
+ufw - Uncomplicated Firewall
+Az Ubuntu alapértelmezett tűzfalbeállító eszköze az ufw. Az iptables beállításának megkönnyítésére tervezett ufw felhasználóbarát módon teszi lehetővé IPv4 vagy IPv6 kiszolgálóalapú tűzfal létrehozását.
+
+Alapértelmezésben az ufw le van tiltva. Az ufw kézikönyvoldala szerint:
+
+„Az ufw-t nem teljes körű tűzfalszolgáltatások biztosítására tervezték a parancsfelületen keresztül, ehelyett lehetővé teszi egyszerű szabályok könnyű felvételét vagy eltávolítását.”
+
+Az alábbiakban az ufw használatára láthat néhány példát:
+
+Első lépésként be kell kapcsolni az ufw-t. Adja ki a következő parancsot:
+
+sudo ufw enable
+Port megnyitása (ebben a példában az SSH-hoz):
+
+sudo ufw allow 22
+A szabályok számozott formátumban is felvehetők:
+
+sudo ufw insert 1 allow 80
+Hasonlóképpen a nyitott port bezárásához:
+
+sudo ufw deny 22
+Szabály eltávolításához használja a delete parancsot a szabály előtt:
+
+sudo ufw delete deny 22
+Lehetőség van adott kiszolgálókról vagy hálózatokról engedélyezni a hozzáférést egy porthoz. A következő példa lehetővé teszi az SSH hozzáférést a 192.168.0.2 IP-című kiszolgálóról bármely IP-címhez ezen a kiszolgálón:
+
+sudo ufw allow proto tcp from 192.168.0.2 to any port 22
+A 192.168.0.2 helyett a 192.168.0.0/24 használatával engedélyezhető az SSH hozzáférés a teljes alhálózatból.
+
+Az ufw parancs a --dry-run kapcsoló hatására kiírja az eredményül kapott szabályokat, de nem alkalmazza azokat. A következő példa bemutatja, hogy a HTTP port kinyitásához mi kerülne alkalmazásra:
+
+sudo ufw --dry-run allow http
+*filter
+:ufw-user-input - [0:0]
+:ufw-user-output - [0:0]
+:ufw-user-forward - [0:0]
+:ufw-user-limit - [0:0]
+:ufw-user-limit-accept - [0:0]
+### RULES ###
+
+### tuple ### allow tcp 80 0.0.0.0/0 any 0.0.0.0/0
+-A ufw-user-input -p tcp --dport 80 -j ACCEPT
+
+### END RULES ###
+-A ufw-user-input -j RETURN
+-A ufw-user-output -j RETURN
+-A ufw-user-forward -j RETURN
+-A ufw-user-limit -m limit --limit 3/minute -j LOG --log-prefix "[UFW LIMIT]: "
+-A ufw-user-limit -j REJECT
+-A ufw-user-limit-accept -j ACCEPT
+COMMIT
+Rules updated
+Az ufw letiltható:
+
+sudo ufw disable
+A tűzfal állapotának megjelenítéséhez adja ki a következőt:
+
+sudo ufw status
+Részletesebb állapotinformációkért adja ki:
+
+sudo ufw status verbose
+A számozott formátum megjelenítéséhez:
+
+sudo ufw status numbered
+[Megjegyzés]	
+Ha a kinyitni vagy bezárni kívánt port az /etc/services fájlban van meghatározva, akkor a szám helyett a portnevet is használhatja. A fenti példákban cserélje a 22-t az ssh-ra.
+
+Ez az ufw használatának rövid bemutatása. További információkért nézze meg az ufw kézikönyvoldalát.
+
+Az ufw alkalmazásintegrációja
+A portokat megnyitó alkalmazások tartalmazhatnak egy ufw profilt, amely részletezi az alkalmazás megfelelő működéséhez szükséges portokat. Ezek a profilok az /etc/ufw/applications.d könyvtárban vannak, és az alapértelmezett portok módosításakor szerkeszthetők.
+
+A profilokat telepített alkalmazások felsorolásához adja ki a következő parancsot:
+
+sudo ufw app list
+Az alkalmazásprofil használata a port forgalmának engedélyezéséhez hasonló módon, a következő parancs kiadásával érhető el:
+
+sudo ufw allow Samba
+A bővített parancs is elérhető:
+
+ufw allow from 192.168.0.0/24 to any app Samba
+A Samba és 192.168.0.0/24 helyett a használandó alkalmazásprofil nevét, és a hálózatának IP-tartományát adja meg.
+
+[Megjegyzés]	
+A protocol megadása nem szükséges az alkalmazáshoz, mivel ezt az információt a profil már tartalmazza. Ne feledje, hogy az alkalmazás neve helyettesíti a port számát.
+
+Egy alkalmazáshoz megadott portok, protokollok stb. részleteinek megjelenítéséhez adja ki a következőt:
+
+sudo ufw app info Samba
+Nem minden, hálózati port megnyitását igénylő alkalmazás tartalmaz ufw profilt, de ha készített profilt egy ilyen alkalmazáshoz, és szeretné azt a csomagban látni, akkor küldjön egy hibajelentést a csomaghoz a Launchpadra.
+
+IP-maszkolás
+Az IP-maszkolás célja, hogy a privát, nem közvetíthető IP-címekkel rendelkező gépek elérjék az internetet a maszkolást végző gépen keresztül. A magánhálózatból az internetre irányuló forgalmat úgy kell módosítani, hogy visszairányítható legyen a kérést küldő gépre. Ehhez a kernelnek módosítania kell minden csomag forrás IP-címét, hogy a válaszok hozzá legyenek visszairányítva, a kérést küldő gép IP-címe helyett, különben a válaszok nem érkeznének meg. A Linux a kapcsolatkövetést (conntrack) használja a gépek és a hozzájuk tartozó kapcsolatok nyilvántartására, és a visszaküldött csomagok ennek megfelelő átirányítására. A hálózatát elhagyó forgalom így „maszkolva” lesz, mintha az Ubuntu átjárógépről indult volna. Ezt a folyamatot a Microsoft dokumentációi internetkapcsolat megosztásának hívják.
+
+ufw maszkolás
+Az IP-maszkolás egyéni ufw szabályok használatával érhető el. Ez azért lehetséges, mert az ufw jelenlegi háttérprogramja az iptables-restore, amelynek szabályfájljai az /etc/ufw/*.rules alatt találhatók. Ezek a fájlok kiválóan alkalmasak az ufw nélkül használt örökölt iptables szabályok, valamint az inkább hálózati átjárókra és hidakra jellemző szabályok felvételére.
+
+A szabályok két különböző fájlba vannak osztva: az ufw parancssori szabályok előtt, és az ufw parancssori szabályok után végrehajtandó szabályok.
+
+Első lépésként a csomagtovábbítást kell engedélyezni az ufw-ben. Két beállítófájlt kell módosítani, az /etc/default/ufw fájlban módosítsa DEFAULT_FORWARD_POLICY értékét „ACCEPT”-re:
+
+DEFAULT_FORWARD_POLICY="ACCEPT"
+Ezután szerkessze az /etc/ufw/sysctl.conf fájlt, és vegye ki megjegyzésből a következőt:
+
+net/ipv4/ip_forward=1
+Hasonlóképp, az IPv6 továbbításhoz vegye ki megjegyzésből a következőt:
+
+net/ipv6/conf/default/forwarding=1
+Ezután szabályokat kell az /etc/ufw/before.rules fájlba felvenni. Az alapértelmezett szabályok csak a filter táblát állítják be, a maszkolás engedélyezéséhez a nat táblát kell beállítani. A fejlécben lévő megjegyzések után vegye fel a következőket a fájl tetejére:
+
+# nat tábla szabályai
+*nat
+:POSTROUTING ACCEPT [0:0]
+
+# Forgalom továbbítása az eth1-ről az eth0-n keresztül.
+-A POSTROUTING -s 192.168.0.0/24 -o eth0 -j MASQUERADE
+
+# Ne törölje a „COMMIT” sort, különben ezen NAT-tábla szabályok nem kerülnek feldolgozásra
+COMMIT
+A megjegyzések nem kötelezőek, de általában véve jó ötlet dokumentálni a beállításokat. Az /etc/ufw könyvtár rules fájljainak módosításakor ne felejtse el a módosított táblák utolsó soraként a következőt megadni:
+
+# Ne törölje a „COMMIT” sort, különben ezen szabályok nem kerülnek feldolgozásra
+COMMIT
+Minden táblához tartoznia kell egy COMMIT utasításnak. Ebben a példában csak a nat és a filter táblák jelennek meg, de szerkesztheti a raw és mangle táblákat is.
+
+[Megjegyzés]	
+A fenti példában látható eth0, eth1 és 192.168.0.0/24 helyett használja a hálózatának megfelelő csatolókat és IP-tartományt.
+
+Végül kapcsolja ki, majd be az ufw-t a módosítások alkalmazásához:
+
+sudo ufw disable && sudo ufw enable
+Az IP-maszkolás ezután engedélyezett. Felvehet további FORWARD szabályokat is az /etc/ufw/before.rules fájlba. Ezeket a további szabályokat javasolt az ufw-before-forward lánchoz adni.
+
+iptables maszkolás
+A maszkolás bekapcsolására az iptables is használható.
+
+Az ufw-hez hasonlóan az első lépés az IPv4 csomagtovábbítás engedélyezése az /etc/sysctl.conf szerkesztésével, és a következő sor megjegyzésből kivételével:
+
+net.ipv4.ip_forward=1
+Ha az IPv6 továbbítást is engedélyezni akarja, a következőt is vegye ki megjegyzésből:
+
+net.ipv6.conf.default.forwarding=1
+Ezután adja ki a sysctl parancsot a beállítófájl új beállításainak életbe léptetéséhez:
+
+sudo sysctl -p
+Az IP-maszkolás ezután elérhető egyetlen iptables szabállyal is, amely enyhén különbözhet a hálózati beállításoktól függően:
+
+sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o ppp0 -j MASQUERADE
+A fenti parancs feltételezi, hogy a magán címtere a 192.168.0.0/16, és az internettel kommunikáló eszköze a ppp0. A szintaxis lebontva a következőkből áll:
+
+-t nat -- a szabály a nat táblába kerül
+
+-A POSTROUTING -- a szabályt a POSTROUTING lánchoz kell fűzni (-A)
+
+-s 192.168.0.0/16 -- a szabály a megadott címtérből induló forgalomra érvényes
+
+-o ppp0 -- a szabály a megadott hálózati eszközön való áthaladásra ütemezett forgalomra érvényes
+
+-j MASQUERADE -- a szabályra illeszkedő forgalomnak át kell „ugrania” (-j) a MASQUERADE célra a fent leírt manipuláció végrehajtásához
+
+A szűrőtábla (az alapértelmezett tábla, ahol a legtöbb vagy minden csomagszűrés történik) minden láncának alapértelmezett irányelve az ACCEPT, de ha átjáróeszközt kiegészítő tűzfalat készít, akkor szükség lehet a DROP vagy REJECT irányelv beállítására, ebben az esetben a maszkolt forgalmat át kell engedni a FORWARD láncon a fenti szabály működéséhez:
+
+sudo iptables -A FORWARD -s 192.168.0.0/16 -o ppp0 -j ACCEPT
+sudo iptables -A FORWARD -d 192.168.0.0/16 -m state --state ESTABLISHED,RELATED -i ppp0 -j ACCEPT
+A fenti parancsok az összes kapcsolatot engedélyezik a helyi hálózatról az internetre, és lehetővé teszik az ezekhez a kapcsolatokhoz tartozó összes forgalom visszaküldését a kezdeményező gépre.
+
+Ha a maszkolást újraindítás után szeretné engedélyezni, akkor módosítsa az /etc/rc.local fájlt, és vegye fel bármelyik fenti parancsot. Például felveheti az első parancsot a szűrés kikapcsolásához:
+
+iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o ppp0 -j MASQUERADE
+Naplók
+A tűzfalnaplók alapvető fontosságúak a támadások felismerésében, a tűzfalszabályok hibáinak elhárításában, és a hálózatán tapasztalható szokatlan aktivitás felfedezésében. A tűzfalszabályok közé naplózási szabályokat is fel kell vennie a naplók előállításához, a naplózási szabályoknak pedig meg kell előzniük az alkalmazandó befejező szabályokat (a csomag sorsát eldöntő céllal rendelkező szabály, például ACCEPT, DROP vagy REJECT).
+
+Ha az ufw-t használja, akkor a következő parancs kiadásával is bekapcsolhatja a naplózást:
+
+sudo ufw logging on
+A naplózás kikapcsolásához az ufw-ben egyszerűen cserélje a fenti parancsban az on értéket off-ra.
+
+Ha az ufw helyett az iptables-t használja, akkor adja ki a következőt:
+
+sudo iptables -A INPUT -m state --state NEW -p tcp --dport 80 -j LOG --log-prefix "NEW_HTTP_CONN: "
+Ezután a helyi gépről a 80-as portra irányuló kérés a dmesgben a következőhöz hasonló naplóbejegyzést hoz létre:
+
+[4304885.870000] NEW_HTTP_CONN: IN=lo OUT= MAC=00:00:00:00:00:00:00:00:00:00:00:00:08:00 SRC=127.0.0.1 DST=127.0.0.1 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=58288 DF PROTO=TCP SPT=53981 DPT=80 WINDOW=32767 RES=0x00 SYN URGP=0
+A fenti naplósor megjelenik a /var/log/messages, /var/log/syslog és /var/log/kern.log fájlokban is. Ez a viselkedés az /etc/syslog.conf megfelelő szerkesztésével, vagy az ulogd telepítésével és beállításával, valamint a LOG helyett az ULOG cél használatával módosítható. Az ulogd démon egy felhasználói térben futó kiszolgáló, amely a kerneltől a kifejezetten tűzfalakra vonatkozó naplózási utasításokat figyeli, és képes tetszőleges fájlba, vagy akár PostgreSQL vagy MySQL adatbázisba is naplózni. A tűzfalnaplók feldolgozása egyszerűsíthető olyan naplóelemző eszközök használatával, mint az fwanalog, fwlogwatch vagy lire.
